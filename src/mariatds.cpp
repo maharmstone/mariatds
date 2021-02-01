@@ -1,28 +1,16 @@
+#include "mariatds.h"
 #include <stdio.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <string.h>
-#include <string>
-#include <stdexcept>
+#include <list>
 
 #define PORT 1433
 #define BACKLOG 10
 
 using namespace std;
 
-class sockets_error : public exception {
-public:
-    sockets_error(const char* func) : err(errno), msg(string(func) + " failed (error " + to_string(err) + ")") {
-    }
-
-    virtual const char* what() const noexcept {
-        return msg.c_str();
-    }
-
-private:
-    int err;
-    string msg;
-};
+list<client_thread> client_threads;
 
 static void run_server() {
     struct sockaddr_in6 server_addr;
@@ -60,6 +48,9 @@ static void run_server() {
 
         if (newsock == -1)
             throw sockets_error("accept");
+
+        client_threads.emplace_back(newsock);
+        // FIXME - remove from list when client disconnects
     }
 }
 
