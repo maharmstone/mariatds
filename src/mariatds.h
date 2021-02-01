@@ -96,6 +96,49 @@ enum class tds_token : uint8_t {
     DONEINPROC = 0xff
 };
 
+enum class tds_login_opt_type : uint8_t {
+    version = 0,
+    encryption,
+    instopt,
+    threadid,
+    mars,
+    traceid,
+    fedauthrequired,
+    nonceopt,
+    terminator = 0xff
+};
+
+struct login_opt {
+    login_opt(enum tds_login_opt_type type, const std::string_view& payload) : type(type), payload(payload) { }
+
+    enum tds_login_opt_type type;
+    std::string payload;
+};
+
+struct tds_login_opt_version {
+    uint8_t major;
+    uint8_t minor;
+    uint16_t build;
+    uint16_t subbuild;
+};
+
+static_assert(sizeof(tds_login_opt_version) == 6, "login_opt_version has wrong size");
+
+struct tds_login_opt {
+    enum tds_login_opt_type type;
+    uint16_t offset;
+    uint16_t length;
+};
+
+static_assert(sizeof(tds_login_opt) == 5, "tds_login_opt has wrong size");
+
+enum class tds_encryption_type : uint8_t {
+    ENCRYPT_OFF,
+    ENCRYPT_ON,
+    ENCRYPT_NOT_SUP,
+    ENCRYPT_REQ
+};
+
 #pragma pack(pop)
 
 class client_thread {
@@ -113,6 +156,7 @@ private:
     void handle_packet(const std::string_view& packet);
     void send_error(const std::string_view& msg);
     void send_msg(enum tds_msg type, const std::string_view& data);
+    void prelogin_msg(const std::string_view& packet);
 
     unsigned int sock;
     std::thread t;

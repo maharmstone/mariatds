@@ -30,11 +30,123 @@ string client_thread::recv(unsigned int len) {
     return s.substr(0, bytes);
 }
 
+void client_thread::prelogin_msg(const string_view& packet) {
+    string_view sv = packet;
+    vector<login_opt> in_opts, out_opts;
+
+    // FIXME - make sure not already logged on
+
+    while (true) {
+        if (!sv.empty() && (enum tds_login_opt_type)sv[0] == tds_login_opt_type::terminator)
+            break;
+
+        if (sv.length() < sizeof(tds_login_opt))
+            throw runtime_error("Malformed prelogin request.");
+
+        auto opt = *(tds_login_opt*)sv.data();
+        opt.offset = __builtin_bswap16(opt.offset);
+        opt.length = __builtin_bswap16(opt.length);
+
+        if (opt.length != 0) {
+            if (opt.offset > packet.length() || opt.offset + opt.length > packet.length())
+                throw runtime_error("Malformed prelogin request.");
+
+            in_opts.emplace_back(opt.type, packet.substr(opt.offset, opt.length));
+        } else
+            in_opts.emplace_back(opt.type, "");
+
+        sv = sv.substr(sizeof(tds_login_opt));
+    }
+
+    for (const auto& opt : in_opts) {
+        switch (opt.type) {
+            case tds_login_opt_type::version: {
+                if (opt.payload.length() < sizeof(tds_login_opt_version))
+                    throw formatted_error(FMT_STRING("Version option was {} bytes, expected {}."), opt.payload.length(), sizeof(tds_login_opt_version));
+
+                tds_login_opt_version out_ver;
+
+                out_ver.major = 15;
+                out_ver.minor = 0;
+                out_ver.build = __builtin_bswap16(4033);
+                out_ver.subbuild = 0;
+
+                out_opts.emplace_back(tds_login_opt_type::version, string_view((char*)&out_ver, sizeof(out_ver)));
+                break;
+            }
+
+            case tds_login_opt_type::encryption: {
+                if (opt.payload.length() < sizeof(enum tds_encryption_type))
+                    throw formatted_error(FMT_STRING("Encryption option was {} bytes, expected {}."), opt.payload.length(), sizeof(enum tds_encryption_type));
+
+                auto enc = (enum tds_encryption_type)opt.payload[0];
+
+                if (enc != tds_encryption_type::ENCRYPT_OFF && enc != tds_encryption_type::ENCRYPT_NOT_SUP)
+                    throw runtime_error("Encryption not supported.");
+
+                out_opts.emplace_back(tds_login_opt_type::encryption, string_view("\x02", 1)); // ENCRYPT_NOT_SUP
+
+                break;
+            }
+
+            case tds_login_opt_type::instopt:
+                out_opts.emplace_back(tds_login_opt_type::instopt, string_view("\x00", 1));
+                break;
+
+            case tds_login_opt_type::threadid:
+                out_opts.emplace_back(tds_login_opt_type::threadid, "");
+                break;
+
+            case tds_login_opt_type::mars:
+                out_opts.emplace_back(tds_login_opt_type::mars, string_view("\x00", 1)); // MARS is off
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    size_t len = sizeof(enum tds_login_opt_type);
+    unsigned int num_opts = 0;
+
+    for (const auto& opt : out_opts) {
+        len += sizeof(tds_login_opt);
+        len += opt.payload.length();
+        num_opts++;
+    }
+
+    string ret;
+
+    ret.resize(len);
+
+    auto oh = (tds_login_opt*)ret.data();
+    auto ptr = ret.data() + (num_opts * sizeof(tds_login_opt)) + sizeof(enum tds_login_opt_type);
+
+    for (const auto& opt : out_opts) {
+        oh->type = opt.type;
+        oh->offset = __builtin_bswap16((uint16_t)(ptr - ret.data()));
+        oh->length = __builtin_bswap16((uint16_t)opt.payload.length());
+
+        if (!opt.payload.empty()) {
+            memcpy(ptr, opt.payload.data(), opt.payload.length());
+            ptr += opt.payload.length();
+        }
+
+        oh++;
+    }
+
+    oh->type = tds_login_opt_type::terminator;
+
+    send_msg(tds_msg::tabular_result, ret);
+}
+
 void client_thread::handle_packet(const string_view& packet) {
     auto& h = *(tds_header*)packet.data();
 
     switch (h.type) {
-        // FIXME
+        case tds_msg::prelogin:
+            prelogin_msg(packet.substr(sizeof(tds_header), h.length - sizeof(tds_header)));
+            break;
 
         default:
             throw formatted_error(FMT_STRING("Unhandled packet type {}."), h.type);
