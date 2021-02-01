@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
 find_package(Threads REQUIRED)
+find_package(fmt REQUIRED)
 
 set(SRC_FILES
 	src/mariatds.cpp
@@ -19,3 +20,4 @@ if(NOT MSVC)
 endif()
 
 target_link_libraries(mariatds PRIVATE Threads::Threads)
+target_link_libraries(mariatds PRIVATE fmt::fmt-header-only)
