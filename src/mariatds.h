@@ -1,6 +1,9 @@
 #include <string>
 #include <stdexcept>
 #include <thread>
+#include <mutex>
+#include <shared_mutex>
+#include <list>
 #include <fmt/format.h>
 
 class sockets_error : public std::exception {
@@ -100,6 +103,9 @@ public:
     client_thread(unsigned int sock) : sock(sock), t([&]() {
         run();
     }) { }
+    ~client_thread();
+
+    std::thread::id thread_id;
 
 private:
     void run();
@@ -114,3 +120,7 @@ private:
     bool open = true;
     uint16_t spid = 0;
 };
+
+// mariatds.cpp
+extern std::list<client_thread> client_threads;
+extern std::shared_mutex client_threads_mutex;

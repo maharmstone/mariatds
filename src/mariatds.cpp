@@ -3,7 +3,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <string.h>
-#include <list>
 
 #define PORT 1433
 #define BACKLOG 10
@@ -11,6 +10,7 @@
 using namespace std;
 
 list<client_thread> client_threads;
+shared_mutex client_threads_mutex;
 
 static void run_server() {
     struct sockaddr_in6 server_addr;
@@ -49,8 +49,10 @@ static void run_server() {
         if (newsock == -1)
             throw sockets_error("accept");
 
-        client_threads.emplace_back(newsock);
-        // FIXME - remove from list when client disconnects
+        {
+            unique_lock<shared_mutex> guard(client_threads_mutex);
+            client_threads.emplace_back(newsock);
+        }
     }
 }
 

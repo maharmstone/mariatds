@@ -1,5 +1,6 @@
 #include "mariatds.h"
 #include <sys/socket.h>
+#include <unistd.h>
 #include <codecvt>
 
 using namespace std;
@@ -118,6 +119,8 @@ void client_thread::send_error(const string_view& msg) {
 
 void client_thread::run() {
     try {
+        thread_id = this_thread::get_id();
+
         while (open) {
             while (buf.length() < sizeof(tds_header)) {
                 buf += recv((unsigned int)(sizeof(tds_header) - buf.length()));
@@ -153,6 +156,21 @@ void client_thread::run() {
         }
     }
 
-    // FIXME - close socket
-    // FIXME - remove from client_threads list
+    thread del_thread([&]() {
+        unique_lock<shared_mutex> guard(client_threads_mutex);
+
+        for (auto it = client_threads.begin(); it != client_threads.end(); it++) {
+            if (it->thread_id == thread_id) {
+                client_threads.erase(it);
+                break;
+            }
+        }
+    });
+
+    del_thread.detach();
+}
+
+client_thread::~client_thread() {
+    close(sock);
+    t.join();
 }
