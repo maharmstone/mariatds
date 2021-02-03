@@ -274,6 +274,44 @@ static string envchange_msg(enum tds_envchange_type type, const u16string_view& 
     return ret;
 }
 
+static string envchange_msg_collation(const tds_collation* new_value, const tds_collation* old_value) {
+    string ret;
+
+    ret.resize(6 + (new_value ? sizeof(tds_collation) : 0) + (old_value ? sizeof(tds_collation) : 0));
+
+    auto ptr = (uint8_t*)ret.data();
+
+    *(enum tds_token*)ptr = tds_token::ENVCHANGE; ptr += sizeof(enum tds_token);
+
+    *(uint16_t*)ptr = (uint16_t)(ret.length() - 3); ptr += sizeof(uint16_t);
+
+    *(enum tds_envchange_type*)ptr = tds_envchange_type::collation; ptr += sizeof(enum tds_envchange_type);
+
+    if (new_value) {
+        *ptr = sizeof(tds_collation);
+        ptr++;
+
+        memcpy(ptr, new_value, sizeof(tds_collation));
+        ptr += sizeof(tds_collation);
+    } else {
+        *ptr = 0;
+        ptr++;
+    }
+
+    if (old_value) {
+        *ptr = sizeof(tds_collation);
+        ptr++;
+
+        memcpy(ptr, old_value, sizeof(tds_collation));
+        ptr += sizeof(tds_collation);
+    } else {
+        *ptr = 0;
+        ptr++;
+    }
+
+    return ret;
+}
+
 void client_thread::login_msg(const string_view& packet) {
     u16string_view username, database;
     string password;
@@ -423,7 +461,7 @@ void client_thread::login_msg(const string_view& packet) {
     init_mysql = true;
 
     if (database.empty())
-        database = u"bind"; // FIXME
+        database = u"test"; // FIXME
 
     if (!mysql_real_connect(&mysql, "luthien"/*FIXME*/, utf16_to_utf8(username).c_str(), password.c_str(),
                             database.empty() ? nullptr : utf16_to_utf8(database).c_str(), 0, nullptr, CLIENT_MULTI_STATEMENTS)) {
@@ -444,7 +482,14 @@ void client_thread::login_msg(const string_view& packet) {
         ret += info_msg(false, 5701, 2, 0, "Changed database context to '"s + cur_db + "'."s, ""/*FIXME - server*/, "", 1);
     }
 
-    // FIXME - envchange collation
+    memset(&def_collation, 0, sizeof(def_collation));
+    def_collation.lcid = 1033; // FIXME
+    def_collation.ignore_case = 1;
+    def_collation.ignore_width = 1;
+    def_collation.ignore_kana = 1;
+    // FIXME - set utf8 flag if client supports it
+
+    ret += envchange_msg_collation(&def_collation, nullptr);
     ret += envchange_msg(tds_envchange_type::language, u"us_english", u"");
 
     ret += info_msg(false, 5703, 1, 0, "Changed language setting to us_english.", ""/*FIXME - server*/, "", 1);

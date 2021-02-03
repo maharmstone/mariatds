@@ -213,6 +213,22 @@ enum class tds_envchange_type : uint8_t {
     routing
 };
 
+struct tds_collation {
+    uint32_t lcid : 20;
+    uint32_t ignore_case : 1;
+    uint32_t ignore_accent : 1;
+    uint32_t ignore_width : 1;
+    uint32_t ignore_kana : 1;
+    uint32_t binary : 1;
+    uint32_t binary2 : 1;
+    uint32_t utf8 : 1;
+    uint32_t reserved : 1;
+    uint32_t version : 4;
+    uint8_t sort_id;
+};
+
+static_assert(sizeof(tds_collation) == 5, "tds_collation has wrong size");
+
 #pragma pack(pop)
 
 enum class client_state {
@@ -246,6 +262,7 @@ private:
     uint16_t spid = 0;
     MYSQL mysql;
     bool init_mysql = false;
+    tds_collation def_collation;
 };
 
 // mariatds.cpp
