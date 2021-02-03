@@ -5,6 +5,11 @@
 
 using namespace std;
 
+#define MSSQL_MAJOR     15
+#define MSSQL_MINOR     0
+#define MSSQL_BUILD     4033
+#define MSSQL_SUBBUILD  0
+
 string client_thread::recv(unsigned int len) {
     string s;
     int bytes, err = 0;
@@ -67,10 +72,10 @@ void client_thread::prelogin_msg(const string_view& packet) {
 
                 tds_login_opt_version out_ver;
 
-                out_ver.major = 15;
-                out_ver.minor = 0;
-                out_ver.build = __builtin_bswap16(4033);
-                out_ver.subbuild = 0;
+                out_ver.major = MSSQL_MAJOR;
+                out_ver.minor = MSSQL_MINOR;
+                out_ver.build = __builtin_bswap16(MSSQL_BUILD);
+                out_ver.subbuild = __builtin_bswap16(MSSQL_SUBBUILD);
 
                 out_opts.emplace_back(tds_login_opt_type::version, string_view((char*)&out_ver, sizeof(out_ver)));
                 break;
@@ -147,6 +152,31 @@ static string utf16_to_utf8(const u16string_view& sv) {
     wstring_convert<codecvt_utf8_utf16<char16_t>, char16_t> convert;
 
     return convert.to_bytes(sv.data(), sv.data() + sv.length());
+}
+
+static string loginack_msg(uint8_t interface, uint32_t tds_version, const u16string_view& server_name) {
+    string ret;
+
+    ret.resize(13 + (server_name.length() * sizeof(char16_t)));
+
+    auto ptr = (uint8_t*)ret.data();
+
+    *(enum tds_token*)ptr = tds_token::LOGINACK; ptr += sizeof(enum tds_token);
+    *(uint16_t*)ptr = (uint16_t)ret.length() - 3; ptr += sizeof(uint16_t);
+
+    *ptr = interface; ptr++;
+    *(uint32_t*)ptr = __builtin_bswap32(tds_version); ptr += sizeof(uint32_t);
+
+    *ptr = (uint8_t)server_name.length(); ptr++;
+
+    memcpy(ptr, server_name.data(), server_name.length() * sizeof(char16_t));
+    ptr += server_name.length() * sizeof(char16_t);
+
+    *ptr = MSSQL_MAJOR; ptr++;
+    *ptr = MSSQL_MINOR; ptr++;
+    *(uint16_t*)ptr = __builtin_bswap16(MSSQL_BUILD);
+
+    return ret;
 }
 
 void client_thread::login_msg(const string_view& packet) {
@@ -307,9 +337,22 @@ void client_thread::login_msg(const string_view& packet) {
         throw runtime_error(err);
     }
 
-    // FIXME - send response
+    string ret;
 
-    throw runtime_error("FIXME");
+    // FIXME - envchange database
+    // FIXME - info database context
+    // FIXME - envchange collation
+    // FIXME - envchange language
+    // FIXME - info language
+    // FIXME - loginack
+
+    ret += loginack_msg(1, 0x74000004, u"Microsoft SQL Server");
+
+    // FIXME - envchange packet size
+    // FIXME - feature ext ack
+    // FIXME - done
+
+    send_msg(tds_msg::tabular_result, ret);
 }
 
 void client_thread::handle_packet(const string_view& packet) {
