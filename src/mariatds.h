@@ -139,7 +139,55 @@ enum class tds_encryption_type : uint8_t {
     ENCRYPT_REQ
 };
 
+struct tds_login_msg {
+    uint32_t length;
+    uint32_t tds_version;
+    uint32_t packet_size;
+    uint32_t client_version;
+    uint32_t client_pid;
+    uint32_t connexion_id;
+    uint8_t option_flags1;
+    uint8_t option_flags2;
+    uint8_t sql_type_flags;
+    uint8_t option_flags3;
+    int32_t timezone;
+    uint32_t collation;
+    uint16_t client_name_offset;
+    uint16_t client_name_length;
+    uint16_t username_offset;
+    uint16_t username_length;
+    uint16_t password_offset;
+    uint16_t password_length;
+    uint16_t app_name_offset;
+    uint16_t app_name_length;
+    uint16_t server_name_offset;
+    uint16_t server_name_length;
+    uint16_t extension_offset;
+    uint16_t extension_length;
+    uint16_t interface_library_offset;
+    uint16_t interface_library_length;
+    uint16_t locale_offset;
+    uint16_t locale_length;
+    uint16_t database_offset;
+    uint16_t database_length;
+    uint8_t mac_address[6];
+    uint16_t sspi_offset;
+    uint16_t sspi_length;
+    uint16_t attach_db_offset;
+    uint16_t attach_db_length;
+    uint16_t new_password_offset;
+    uint16_t new_password_length;
+    uint32_t sspi_long;
+};
+
+static_assert(sizeof(tds_login_msg) == 94, "tds_login_msg has wrong size");
+
 #pragma pack(pop)
+
+enum class client_state {
+    prelogin,
+    login
+};
 
 class client_thread {
 public:
@@ -149,6 +197,7 @@ public:
     ~client_thread();
 
     std::thread::id thread_id;
+    enum client_state state = client_state::prelogin;
 
 private:
     void run();
@@ -157,6 +206,7 @@ private:
     void send_error(const std::string_view& msg);
     void send_msg(enum tds_msg type, const std::string_view& data);
     void prelogin_msg(const std::string_view& packet);
+    void login_msg(const std::string_view& packet);
 
     unsigned int sock;
     std::thread t;

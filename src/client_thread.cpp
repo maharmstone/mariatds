@@ -34,7 +34,8 @@ void client_thread::prelogin_msg(const string_view& packet) {
     string_view sv = packet;
     vector<login_opt> in_opts, out_opts;
 
-    // FIXME - make sure not already logged on
+    if (state != client_state::prelogin)
+        throw runtime_error("Prelogin message already received.");
 
     while (true) {
         if (!sv.empty() && (enum tds_login_opt_type)sv[0] == tds_login_opt_type::terminator)
@@ -137,13 +138,176 @@ void client_thread::prelogin_msg(const string_view& packet) {
 
     oh->type = tds_login_opt_type::terminator;
 
+    state = client_state::login;
+
     send_msg(tds_msg::tabular_result, ret);
+}
+
+static string utf16_to_utf8(const u16string_view& sv) {
+    wstring_convert<codecvt_utf8_utf16<char16_t>, char16_t> convert;
+
+    return convert.to_bytes(sv.data(), sv.data() + sv.length());
+}
+
+void client_thread::login_msg(const string_view& packet) {
+    u16string_view client_name, username, app_name, server_name, interface_library, locale, database, attach_db;
+    string password, new_password;
+
+    if (state == client_state::prelogin)
+        throw runtime_error("Prelogin message not yet received.");
+    else if (state != client_state::login)
+        throw runtime_error("Already logged in.");
+
+    if (packet.length() < sizeof(tds_login_msg))
+        throw formatted_error(FMT_STRING("Received {} bytes, expected at least {}."), packet.length(), sizeof(tds_login_msg));
+
+    auto& msg = *(tds_login_msg*)packet.data();
+
+    if (msg.length > packet.length())
+        throw formatted_error(FMT_STRING("Message length {} was longer than packet length {}."), msg.length, packet.length());
+
+    // FIXME - check tds_version
+    // FIXME - check option_flags1, option_flags2, sql_type_flags, option_flags3
+    // FIXME - store collation (and timezone?)
+
+    if (msg.client_name_length > 0) {
+        if (msg.client_name_offset > msg.length || msg.client_name_offset + msg.client_name_length > msg.length)
+            throw runtime_error("Malformed login message.");
+
+        client_name = u16string_view((char16_t*)(packet.data() + msg.client_name_offset), msg.client_name_length);
+    }
+
+    if (msg.username_length > 0) {
+        if (msg.username_offset > msg.length || msg.username_offset + msg.username_length > msg.length)
+            throw runtime_error("Malformed login message.");
+
+        username = u16string_view((char16_t*)(packet.data() + msg.username_offset), msg.username_length);
+    }
+
+    if (msg.password_length > 0) {
+        if (msg.password_offset > msg.length || msg.password_offset + msg.password_length > msg.length)
+            throw runtime_error("Malformed login message.");
+
+        auto password_enc = u16string_view((char16_t*)(packet.data() + msg.password_offset), msg.password_length);
+        u16string password_utf16;
+
+        password_utf16.resize(msg.password_length);
+
+        auto pw_src = (uint8_t*)password_enc.data();
+        auto pw_dest = (uint8_t*)password_utf16.data();
+
+        for (unsigned int i = 0; i < password_enc.length() * sizeof(char16_t); i++) {
+            uint8_t c = *pw_src;
+
+            c ^= 0xa5;
+            c = (uint8_t)(((c & 0xf) << 4) | (c >> 4));
+
+            *pw_dest = c;
+
+            pw_src++;
+            pw_dest++;
+        }
+
+        password = utf16_to_utf8(password_utf16);
+    }
+
+    if (msg.app_name_length > 0) {
+        if (msg.app_name_offset > msg.length || msg.app_name_offset + msg.app_name_length > msg.length)
+            throw runtime_error("Malformed login message.");
+
+        app_name = u16string_view((char16_t*)(packet.data() + msg.app_name_offset), msg.app_name_length);
+    }
+
+    if (msg.server_name_length > 0) {
+        if (msg.server_name_offset > msg.length || msg.server_name_offset + msg.server_name_length > msg.length)
+            throw runtime_error("Malformed login message.");
+
+        server_name = u16string_view((char16_t*)(packet.data() + msg.server_name_offset), msg.server_name_length);
+    }
+
+    // FIXME - get extension features (esp. UTF-8)
+
+    if (msg.interface_library_length > 0) {
+        if (msg.interface_library_offset > msg.length || msg.interface_library_offset + msg.interface_library_length > msg.length)
+            throw runtime_error("Malformed login message.");
+
+        interface_library = u16string_view((char16_t*)(packet.data() + msg.interface_library_offset), msg.interface_library_length);
+    }
+
+    if (msg.locale_length > 0) {
+        if (msg.locale_offset > msg.length || msg.locale_offset + msg.locale_length > msg.length)
+            throw runtime_error("Malformed login message.");
+
+        locale = u16string_view((char16_t*)(packet.data() + msg.locale_offset), msg.locale_length);
+    }
+
+    if (msg.database_length > 0) {
+        if (msg.database_offset > msg.length || msg.database_offset + msg.database_length > msg.length)
+            throw runtime_error("Malformed login message.");
+
+        database = u16string_view((char16_t*)(packet.data() + msg.database_offset), msg.database_length);
+    }
+
+    // FIXME - SSPI
+
+    if (msg.attach_db_length > 0) {
+        if (msg.attach_db_offset > msg.length || msg.attach_db_offset + msg.attach_db_length > msg.length)
+            throw runtime_error("Malformed login message.");
+
+        attach_db = u16string_view((char16_t*)(packet.data() + msg.attach_db_offset), msg.attach_db_length);
+    }
+
+    if (msg.new_password_length > 0) {
+        if (msg.new_password_offset > msg.length || msg.new_password_offset + msg.new_password_length > msg.length)
+            throw runtime_error("Malformed login message.");
+
+        auto new_password_enc = u16string_view((char16_t*)(packet.data() + msg.new_password_offset), msg.new_password_length);
+        u16string new_password_utf16;
+
+        new_password_utf16.resize(msg.new_password_length);
+
+        auto pw_src = (uint8_t*)new_password_enc.data();
+        auto pw_dest = (uint8_t*)new_password_utf16.data();
+
+        for (unsigned int i = 0; i < new_password_enc.length() * sizeof(char16_t); i++) {
+            uint8_t c = *pw_src;
+
+            c ^= 0xa5;
+            c = (uint8_t)(((c & 0xf) << 4) | (c >> 4));
+
+            *pw_dest = c;
+
+            pw_src++;
+            pw_dest++;
+        }
+
+        new_password = utf16_to_utf8(new_password_utf16);
+    }
+
+    fmt::print("client name = {}\n", utf16_to_utf8(client_name));
+    fmt::print("username = {}\n", utf16_to_utf8(username));
+    fmt::print("password = {}\n", password);
+    fmt::print("app_name = {}\n", utf16_to_utf8(app_name));
+    fmt::print("server_name = {}\n", utf16_to_utf8(server_name));
+    fmt::print("interface_library = {}\n", utf16_to_utf8(interface_library));
+    fmt::print("locale = {}\n", utf16_to_utf8(locale));
+    fmt::print("database = {}\n", utf16_to_utf8(database));
+    fmt::print("attach_db = {}\n", utf16_to_utf8(attach_db));
+    fmt::print("new_password = {}\n", new_password);
+
+    // FIXME - pass to MariaDB
+
+    throw runtime_error("FIXME");
 }
 
 void client_thread::handle_packet(const string_view& packet) {
     auto& h = *(tds_header*)packet.data();
 
     switch (h.type) {
+        case tds_msg::tds7_login:
+            login_msg(packet.substr(sizeof(tds_header), h.length - sizeof(tds_header)));
+            break;
+
         case tds_msg::prelogin:
             prelogin_msg(packet.substr(sizeof(tds_header), h.length - sizeof(tds_header)));
             break;
