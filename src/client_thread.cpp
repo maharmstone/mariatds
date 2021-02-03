@@ -179,6 +179,24 @@ static string loginack_msg(uint8_t interface, uint32_t tds_version, const u16str
     return ret;
 }
 
+static string done_msg(uint16_t status, uint16_t curcmd, uint64_t rowcount) {
+    string ret;
+
+    ret.resize(1 + sizeof(tds_done_msg));
+
+    auto ptr = (uint8_t*)ret.data();
+
+    *(enum tds_token*)ptr = tds_token::DONE; ptr += sizeof(enum tds_token);
+
+    auto& h = *(tds_done_msg*)ptr;
+
+    h.status = status;
+    h.curcmd = curcmd;
+    h.rowcount = rowcount;
+
+    return ret;
+}
+
 void client_thread::login_msg(const string_view& packet) {
     u16string_view username, database;
     string password;
@@ -350,7 +368,8 @@ void client_thread::login_msg(const string_view& packet) {
 
     // FIXME - envchange packet size
     // FIXME - feature ext ack
-    // FIXME - done
+
+    ret += done_msg(0, 0, 0);
 
     send_msg(tds_msg::tabular_result, ret);
 }

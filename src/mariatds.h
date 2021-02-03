@@ -183,6 +183,14 @@ struct tds_login_msg {
 
 static_assert(sizeof(tds_login_msg) == 94, "tds_login_msg has wrong size");
 
+struct tds_done_msg {
+    uint16_t status;
+    uint16_t curcmd;
+    uint64_t rowcount;
+};
+
+static_assert(sizeof(tds_done_msg) == 12, "tds_done_msg has wrong size");
+
 #pragma pack(pop)
 
 enum class client_state {
