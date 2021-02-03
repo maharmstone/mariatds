@@ -191,6 +191,28 @@ struct tds_done_msg {
 
 static_assert(sizeof(tds_done_msg) == 12, "tds_done_msg has wrong size");
 
+enum class tds_envchange_type : uint8_t {
+    database = 1,
+    language,
+    charset,
+    packet_size,
+    unicode_data_sort_local_id,
+    unicode_data_sort_comparison_flags,
+    collation,
+    begin_trans,
+    commit_trans,
+    rollback_trans,
+    enlist_dist_trans,
+    defect_trans,
+    log_shipping,
+    promote_trans = 15,
+    trans_man_address,
+    trans_ended,
+    reset_completion_acknowledgement,
+    user_instance_started,
+    routing
+};
+
 #pragma pack(pop)
 
 enum class client_state {

@@ -250,6 +250,30 @@ static string done_msg(uint16_t status, uint16_t curcmd, uint64_t rowcount) {
     return ret;
 }
 
+static string envchange_msg(enum tds_envchange_type type, const u16string_view& new_value,
+                            const u16string_view& old_value) {
+    string ret;
+
+    ret.resize(6 + ((new_value.length() + old_value.length()) * sizeof(char16_t)));
+
+    auto ptr = (uint8_t*)ret.data();
+
+    *(enum tds_token*)ptr = tds_token::ENVCHANGE; ptr += sizeof(enum tds_token);
+
+    *(uint16_t*)ptr = (uint16_t)(ret.length() - 3); ptr += sizeof(uint16_t);
+
+    *(enum tds_envchange_type*)ptr = type; ptr += sizeof(enum tds_envchange_type);
+
+    *ptr = (uint8_t)new_value.length(); ptr++;
+    memcpy(ptr, new_value.data(), new_value.length() * sizeof(char16_t));
+    ptr += new_value.length() * sizeof(char16_t);
+
+    *ptr = (uint8_t)old_value.length(); ptr++;
+    memcpy(ptr, old_value.data(), old_value.length() * sizeof(char16_t));
+
+    return ret;
+}
+
 void client_thread::login_msg(const string_view& packet) {
     u16string_view username, database;
     string password;
@@ -415,19 +439,20 @@ void client_thread::login_msg(const string_view& packet) {
     const char* cur_db;
 
     if (!mariadb_get_infov(&mysql, MARIADB_CONNECTION_SCHEMA, &cur_db) && cur_db) {
-        // FIXME - envchange database
+        ret += envchange_msg(tds_envchange_type::database, utf8_to_utf16(cur_db), u"master");
 
         ret += info_msg(false, 5701, 2, 0, "Changed database context to '"s + cur_db + "'."s, ""/*FIXME - server*/, "", 1);
     }
 
     // FIXME - envchange collation
-    // FIXME - envchange language
+    ret += envchange_msg(tds_envchange_type::language, u"us_english", u"");
 
     ret += info_msg(false, 5703, 1, 0, "Changed language setting to us_english.", ""/*FIXME - server*/, "", 1);
 
     ret += loginack_msg(1, 0x74000004, u"Microsoft SQL Server");
 
-    // FIXME - envchange packet size
+    ret += envchange_msg(tds_envchange_type::packet_size, u"4096", u"4096");
+
     // FIXME - feature ext ack
 
     ret += done_msg(0, 0, 0);
