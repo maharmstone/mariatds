@@ -294,11 +294,20 @@ void client_thread::login_msg(const string_view& packet) {
     }
 #endif
 
-    fmt::print("username = {}\n", utf16_to_utf8(username));
-    fmt::print("password = {}\n", password);
-    fmt::print("database = {}\n", utf16_to_utf8(database));
+    mysql_init(&mysql);
+    init_mysql = true;
 
-    // FIXME - pass to MariaDB
+    if (!mysql_real_connect(&mysql, "luthien"/*FIXME*/, utf16_to_utf8(username).c_str(), password.c_str(),
+                            database.empty() ? nullptr : utf16_to_utf8(database).c_str(), 0, nullptr, CLIENT_MULTI_STATEMENTS)) {
+        const char* err = mysql_error(&mysql);
+
+        if (!err)
+            throw runtime_error("mysql_real_connect failed");
+
+        throw runtime_error(err);
+    }
+
+    // FIXME - send response
 
     throw runtime_error("FIXME");
 }
@@ -452,4 +461,7 @@ void client_thread::run() {
 client_thread::~client_thread() {
     close(sock);
     t.join();
+
+    if (init_mysql)
+        mysql_close(&mysql);
 }

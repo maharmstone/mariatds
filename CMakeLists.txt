@@ -21,3 +21,4 @@ endif()
 
 target_link_libraries(mariatds PRIVATE Threads::Threads)
 target_link_libraries(mariatds PRIVATE fmt::fmt-header-only)
+target_link_libraries(mariatds PRIVATE mariadb)

@@ -5,6 +5,7 @@
 #include <shared_mutex>
 #include <list>
 #include <fmt/format.h>
+#include <mariadb/mysql.h>
 
 class sockets_error : public std::exception {
 public:
@@ -213,6 +214,8 @@ private:
     std::string buf;
     bool open = true;
     uint16_t spid = 0;
+    MYSQL mysql;
+    bool init_mysql = false;
 };
 
 // mariatds.cpp
