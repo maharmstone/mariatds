@@ -150,8 +150,12 @@ static string utf16_to_utf8(const u16string_view& sv) {
 }
 
 void client_thread::login_msg(const string_view& packet) {
-    u16string_view client_name, username, app_name, server_name, interface_library, locale, database, attach_db;
-    string password, new_password;
+    u16string_view username, database;
+    string password;
+#if 0
+    u16string_view client_name, server_name, app_name, interface_library, database, attach_db;
+    string new_password;
+#endif
 
     if (state == client_state::prelogin)
         throw runtime_error("Prelogin message not yet received.");
@@ -170,12 +174,14 @@ void client_thread::login_msg(const string_view& packet) {
     // FIXME - check option_flags1, option_flags2, sql_type_flags, option_flags3
     // FIXME - store collation (and timezone?)
 
+#if 0
     if (msg.client_name_length > 0) {
         if (msg.client_name_offset > msg.length || msg.client_name_offset + msg.client_name_length > msg.length)
             throw runtime_error("Malformed login message.");
 
         client_name = u16string_view((char16_t*)(packet.data() + msg.client_name_offset), msg.client_name_length);
     }
+#endif
 
     if (msg.username_length > 0) {
         if (msg.username_offset > msg.length || msg.username_offset + msg.username_length > msg.length)
@@ -211,6 +217,7 @@ void client_thread::login_msg(const string_view& packet) {
         password = utf16_to_utf8(password_utf16);
     }
 
+#if 0
     if (msg.app_name_length > 0) {
         if (msg.app_name_offset > msg.length || msg.app_name_offset + msg.app_name_length > msg.length)
             throw runtime_error("Malformed login message.");
@@ -240,6 +247,7 @@ void client_thread::login_msg(const string_view& packet) {
 
         locale = u16string_view((char16_t*)(packet.data() + msg.locale_offset), msg.locale_length);
     }
+#endif
 
     if (msg.database_length > 0) {
         if (msg.database_offset > msg.length || msg.database_offset + msg.database_length > msg.length)
@@ -250,6 +258,7 @@ void client_thread::login_msg(const string_view& packet) {
 
     // FIXME - SSPI
 
+#if 0
     if (msg.attach_db_length > 0) {
         if (msg.attach_db_offset > msg.length || msg.attach_db_offset + msg.attach_db_length > msg.length)
             throw runtime_error("Malformed login message.");
@@ -283,17 +292,11 @@ void client_thread::login_msg(const string_view& packet) {
 
         new_password = utf16_to_utf8(new_password_utf16);
     }
+#endif
 
-    fmt::print("client name = {}\n", utf16_to_utf8(client_name));
     fmt::print("username = {}\n", utf16_to_utf8(username));
     fmt::print("password = {}\n", password);
-    fmt::print("app_name = {}\n", utf16_to_utf8(app_name));
-    fmt::print("server_name = {}\n", utf16_to_utf8(server_name));
-    fmt::print("interface_library = {}\n", utf16_to_utf8(interface_library));
-    fmt::print("locale = {}\n", utf16_to_utf8(locale));
     fmt::print("database = {}\n", utf16_to_utf8(database));
-    fmt::print("attach_db = {}\n", utf16_to_utf8(attach_db));
-    fmt::print("new_password = {}\n", new_password);
 
     // FIXME - pass to MariaDB
 
