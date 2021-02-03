@@ -10,6 +10,59 @@ using namespace std;
 #define MSSQL_BUILD     4033
 #define MSSQL_SUBBUILD  0
 
+static u16string utf8_to_utf16(const string_view& sv) {
+    wstring_convert<codecvt_utf8_utf16<char16_t>, char16_t> convert;
+
+    return convert.from_bytes(sv.data(), sv.data() + sv.length());
+}
+
+static string info_msg(bool error, int32_t msgno, uint8_t state, uint8_t severity,
+                       const string_view& msg, const string_view& server, const string_view& proc,
+                       uint32_t line_no) {
+    string ret;
+    auto msg_us = utf8_to_utf16(msg);
+    auto server_us = utf8_to_utf16(server);
+    auto proc_us = utf8_to_utf16(proc);
+    size_t len = sizeof(tds_info_msg) +
+                 sizeof(uint16_t) + (msg_us.length() * sizeof(char16_t)) +
+                 sizeof(uint8_t) + (server_us.length() * sizeof(char16_t)) +
+                 sizeof(uint8_t) + (proc_us.length() * sizeof(char16_t)) +
+                 sizeof(uint32_t);
+
+    ret.resize(sizeof(enum tds_token) + sizeof(uint16_t) + len);
+
+    auto ptr = (uint8_t*)ret.data();
+
+    *(enum tds_token*)ptr = error ? tds_token::TDS_ERROR : tds_token::INFO;
+    ptr += sizeof(enum tds_token);
+
+    *(uint16_t*)ptr = (uint16_t)len; ptr += sizeof(uint16_t);
+
+    auto h = (tds_info_msg*)ptr;
+
+    h->msgno = msgno;
+    h->state = state;
+    h->severity = severity;
+
+    ptr += sizeof(tds_info_msg);
+
+    *(uint16_t*)ptr = (uint16_t)msg_us.length(); ptr += sizeof(uint16_t);
+    memcpy(ptr, msg_us.data(), msg_us.length() * sizeof(char16_t));
+    ptr += msg_us.length() * sizeof(char16_t);
+
+    *(uint8_t*)ptr = (uint8_t)server_us.length(); ptr += sizeof(uint8_t);
+    memcpy(ptr, server_us.data(), server_us.length() * sizeof(char16_t));
+    ptr += server_us.length() * sizeof(char16_t);
+
+    *(uint8_t*)ptr = (uint8_t)proc_us.length(); ptr += sizeof(uint8_t);
+    memcpy(ptr, proc_us.data(), proc_us.length() * sizeof(char16_t));
+    ptr += proc_us.length() * sizeof(char16_t);
+
+    *(uint32_t*)ptr = line_no;
+
+    return ret;
+}
+
 string client_thread::recv(unsigned int len) {
     string s;
     int bytes, err = 0;
@@ -345,6 +398,9 @@ void client_thread::login_msg(const string_view& packet) {
     mysql_init(&mysql);
     init_mysql = true;
 
+    if (database.empty())
+        database = u"bind"; // FIXME
+
     if (!mysql_real_connect(&mysql, "luthien"/*FIXME*/, utf16_to_utf8(username).c_str(), password.c_str(),
                             database.empty() ? nullptr : utf16_to_utf8(database).c_str(), 0, nullptr, CLIENT_MULTI_STATEMENTS)) {
         const char* err = mysql_error(&mysql);
@@ -356,13 +412,18 @@ void client_thread::login_msg(const string_view& packet) {
     }
 
     string ret;
+    const char* cur_db;
 
-    // FIXME - envchange database
-    // FIXME - info database context
+    if (!mariadb_get_infov(&mysql, MARIADB_CONNECTION_SCHEMA, &cur_db) && cur_db) {
+        // FIXME - envchange database
+
+        ret += info_msg(false, 5701, 2, 0, "Changed database context to '"s + cur_db + "'."s, ""/*FIXME - server*/, "", 1);
+    }
+
     // FIXME - envchange collation
     // FIXME - envchange language
-    // FIXME - info language
-    // FIXME - loginack
+
+    ret += info_msg(false, 5703, 1, 0, "Changed language setting to us_english.", ""/*FIXME - server*/, "", 1);
 
     ret += loginack_msg(1, 0x74000004, u"Microsoft SQL Server");
 
@@ -408,59 +469,6 @@ void client_thread::send_msg(enum tds_msg type, const string_view& data) {
     memcpy(packet.data() + sizeof(tds_header), data.data(), data.length());
 
     send(sock, packet.data(), packet.length(), 0);
-}
-
-static u16string utf8_to_utf16(const string_view& sv) {
-    wstring_convert<codecvt_utf8_utf16<char16_t>, char16_t> convert;
-
-    return convert.from_bytes(sv.data(), sv.data() + sv.length());
-}
-
-static string info_msg(bool error, int32_t msgno, uint8_t state, uint8_t severity,
-                       const string_view& msg, const string_view& server, const string_view& proc,
-                       uint32_t line_no) {
-    string ret;
-    auto msg_us = utf8_to_utf16(msg);
-    auto server_us = utf8_to_utf16(server);
-    auto proc_us = utf8_to_utf16(proc);
-    size_t len = sizeof(tds_info_msg) +
-                 sizeof(uint16_t) + (msg_us.length() * sizeof(char16_t)) +
-                 sizeof(uint8_t) + (server_us.length() * sizeof(char16_t)) +
-                 sizeof(uint8_t) + (proc_us.length() * sizeof(char16_t)) +
-                 sizeof(uint32_t);
-
-    ret.resize(sizeof(enum tds_token) + sizeof(uint16_t) + len);
-
-    auto ptr = (uint8_t*)ret.data();
-
-    *(enum tds_token*)ptr = error ? tds_token::TDS_ERROR : tds_token::INFO;
-    ptr += sizeof(enum tds_token);
-
-    *(uint16_t*)ptr = (uint16_t)len; ptr += sizeof(uint16_t);
-
-    auto h = (tds_info_msg*)ptr;
-
-    h->msgno = msgno;
-    h->state = state;
-    h->severity = severity;
-
-    ptr += sizeof(tds_info_msg);
-
-    *(uint16_t*)ptr = (uint16_t)msg_us.length(); ptr += sizeof(uint16_t);
-    memcpy(ptr, msg_us.data(), msg_us.length() * sizeof(char16_t));
-    ptr += msg_us.length() * sizeof(char16_t);
-
-    *(uint8_t*)ptr = (uint8_t)server_us.length(); ptr += sizeof(uint8_t);
-    memcpy(ptr, server_us.data(), server_us.length() * sizeof(char16_t));
-    ptr += server_us.length() * sizeof(char16_t);
-
-    *(uint8_t*)ptr = (uint8_t)proc_us.length(); ptr += sizeof(uint8_t);
-    memcpy(ptr, proc_us.data(), proc_us.length() * sizeof(char16_t));
-    ptr += proc_us.length() * sizeof(char16_t);
-
-    *(uint32_t*)ptr = line_no;
-
-    return ret;
 }
 
 void client_thread::send_error(const string_view& msg) {
