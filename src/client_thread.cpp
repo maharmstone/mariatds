@@ -520,12 +520,33 @@ void client_thread::batch_msg(const string_view& packet) {
         if (packet.length() < header_length)
             throw formatted_error(FMT_STRING("Packet length was {}, expected at least {}."), packet.length(), header_length);
 
-        auto query = u16string_view((char16_t*)(packet.data() + header_length),
-                                    (packet.length() - header_length) / sizeof(char16_t));
+        auto query_utf16 = u16string_view((char16_t*)(packet.data() + header_length),
+                                          (packet.length() - header_length) / sizeof(char16_t));
+        auto query = utf16_to_utf8(query_utf16);
 
-        // FIXME
+        if (mysql_real_query(&mysql, query.data(), query.length())) {
+            auto err = mysql_error(&mysql);
 
-        throw runtime_error("FIXME: " + utf16_to_utf8(query));
+            if (err)
+                throw runtime_error(err);
+            else
+                throw runtime_error("mysql_real_query failed");
+        }
+
+        string ret;
+        uint64_t row_count = 0;
+        bool has_row_count = false;
+
+        if (mysql_field_count(&mysql)) {
+            // FIXME - send multiple packets if too big
+
+            // FIXME - send COLMETADATA
+            // FIXME - send ROW
+        }
+
+        ret += done_msg(has_row_count ? 0x10 : 0, 0xc1, row_count);
+
+        send_msg(tds_msg::tabular_result, ret);
     } catch (const exception& e) {
         send_error(e.what());
     }
