@@ -503,12 +503,42 @@ void client_thread::login_msg(const string_view& packet) {
     ret += done_msg(0, 0, 0);
 
     send_msg(tds_msg::tabular_result, ret);
+
+    state = client_state::connected;
+}
+
+void client_thread::batch_msg(const string_view& packet) {
+    if (state != client_state::connected)
+        throw runtime_error("Not logged in.");
+
+    try {
+        if (packet.length() < sizeof(uint32_t))
+            throw formatted_error(FMT_STRING("Packet length was {}, expected at least 4."), packet.length());
+
+        auto header_length = *(uint32_t*)packet.data();
+
+        if (packet.length() < header_length)
+            throw formatted_error(FMT_STRING("Packet length was {}, expected at least {}."), packet.length(), header_length);
+
+        auto query = u16string_view((char16_t*)(packet.data() + header_length),
+                                    (packet.length() - header_length) / sizeof(char16_t));
+
+        // FIXME
+
+        throw runtime_error("FIXME: " + utf16_to_utf8(query));
+    } catch (const exception& e) {
+        send_error(e.what());
+    }
 }
 
 void client_thread::handle_packet(const string_view& packet) {
     auto& h = *(tds_header*)packet.data();
 
     switch (h.type) {
+        case tds_msg::sql_batch:
+            batch_msg(packet.substr(sizeof(tds_header), h.length - sizeof(tds_header)));
+            break;
+
         case tds_msg::tds7_login:
             login_msg(packet.substr(sizeof(tds_header), h.length - sizeof(tds_header)));
             break;

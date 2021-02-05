@@ -233,7 +233,8 @@ static_assert(sizeof(tds_collation) == 5, "tds_collation has wrong size");
 
 enum class client_state {
     prelogin,
-    login
+    login,
+    connected
 };
 
 class client_thread {
@@ -254,6 +255,7 @@ private:
     void send_msg(enum tds_msg type, const std::string_view& data);
     void prelogin_msg(const std::string_view& packet);
     void login_msg(const std::string_view& packet);
+    void batch_msg(const std::string_view& packet);
 
     unsigned int sock;
     std::thread t;
