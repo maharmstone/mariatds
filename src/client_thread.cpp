@@ -563,6 +563,29 @@ static string colmetadata_msg(MYSQL_RES* res, unsigned int field_count) {
     return ret;
 }
 
+static string row_msg(MYSQL_ROW row, unsigned int field_count) {
+    string ret;
+    size_t off;
+
+    // FIXME - send NBC_ROW if more efficient
+
+    ret.resize(1);
+    *(enum tds_token*)ret.data() = tds_token::ROW;
+
+    off = 1;
+
+    for (unsigned int i = 0; i < field_count; i++) {
+        // FIXME - send actual result
+
+        ret.resize(ret.length() + sizeof(int32_t));
+
+        *(int32_t*)(ret.data() + off) = 229; // FIXME!
+        off += sizeof(int32_t);
+    }
+
+    return ret;
+}
+
 void client_thread::batch_msg(const string_view& packet) {
     if (state != client_state::connected)
         throw runtime_error("Not logged in.");
@@ -599,12 +622,23 @@ void client_thread::batch_msg(const string_view& packet) {
             if (!res)
                 throw runtime_error("mysql_store_result returned NULL");
 
-            // FIXME - send multiple packets if too big
-            // FIXME - what happens if EXEC call and multiple rowsets returned?
+            try {
+                // FIXME - send multiple packets if too big
+                // FIXME - what happens if EXEC call and multiple rowsets returned?
 
-            ret += colmetadata_msg(res, field_count);
+                ret += colmetadata_msg(res, field_count);
 
-            // FIXME - send ROW
+                while (MYSQL_ROW row = mysql_fetch_row(res)) {
+                    ret += row_msg(row, field_count);
+
+                    row_count++;
+                }
+            } catch (...) {
+                mysql_free_result(res);
+                throw;
+            }
+
+            mysql_free_result(res);
         }
 
         ret += done_msg(field_count != 0 ? 0x10 : 0, 0xc1, row_count);
