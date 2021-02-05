@@ -229,6 +229,53 @@ struct tds_collation {
 
 static_assert(sizeof(tds_collation) == 5, "tds_collation has wrong size");
 
+enum class sql_type : uint8_t {
+    SQL_NULL = 0x1F,
+    IMAGE = 0x22,
+    TEXT = 0x23,
+    UNIQUEIDENTIFIER = 0x24,
+    INTN = 0x26,
+    DATE = 0x28,
+    TIME = 0x29,
+    DATETIME2 = 0x2A,
+    DATETIMEOFFSET = 0x2B,
+    TINYINT = 0x30,
+    BIT = 0x32,
+    SMALLINT = 0x34,
+    INT = 0x38,
+    DATETIM4 = 0x3A,
+    REAL = 0x3B,
+    MONEY = 0x3C,
+    DATETIME = 0x3D,
+    FLOAT = 0x3E,
+    SQL_VARIANT = 0x62,
+    NTEXT = 0x63,
+    BITN = 0x68,
+    DECIMAL = 0x6A,
+    NUMERIC = 0x6C,
+    FLTN = 0x6D,
+    MONEYN = 0x6E,
+    DATETIMN = 0x6F,
+    SMALLMONEY = 0x7A,
+    BIGINT = 0x7F,
+    VARBINARY = 0xA5,
+    VARCHAR = 0xA7,
+    BINARY = 0xAD,
+    CHAR = 0xAF,
+    NVARCHAR = 0xE7,
+    NCHAR = 0xEF,
+    UDT = 0xF0,
+    XML = 0xF1,
+};
+
+struct tds_colmetadata_col {
+    uint32_t user_type;
+    uint16_t flags;
+    sql_type type;
+};
+
+static_assert(sizeof(tds_colmetadata_col) == 7, "tds_colmetadata_col has wrong size");
+
 #pragma pack(pop)
 
 enum class client_state {

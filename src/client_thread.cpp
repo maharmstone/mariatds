@@ -473,6 +473,8 @@ void client_thread::login_msg(const string_view& packet) {
         throw runtime_error(err);
     }
 
+    // FIXME - set SQL_MODE to MSSQL
+
     string ret;
     const char* cur_db;
 
@@ -507,6 +509,60 @@ void client_thread::login_msg(const string_view& packet) {
     state = client_state::connected;
 }
 
+static string field_metadata(const MYSQL_FIELD& f) {
+    string ret;
+    string_view name;
+    size_t off = 0;
+
+    ret.resize(sizeof(tds_colmetadata_col));
+
+    auto& h = *(tds_colmetadata_col*)ret.data();
+
+    h.user_type = 0;
+    h.flags = 0; // FIXME - mark for nullable
+    h.type = sql_type::INT; // FIXME - translate from MariaDB type
+
+    off = sizeof(tds_colmetadata_col);
+
+    // FIXME - append type length, collation, precision, scale
+
+    if (f.name)
+        name = string_view(f.name, f.name_length);
+
+    auto name_utf16 = utf8_to_utf16(name);
+
+    ret.resize(ret.length() + sizeof(uint8_t) + (name_utf16.length() * sizeof(char16_t)));
+
+    *(uint8_t*)(ret.data() + off) = (uint8_t)name_utf16.length();
+    off++;
+
+    memcpy(ret.data() + off, name_utf16.data(), name_utf16.length() * sizeof(char16_t));
+
+    return ret;
+}
+
+static string colmetadata_msg(MYSQL_RES* res, unsigned int field_count) {
+    string ret;
+
+    if (field_count > 65535)
+        throw runtime_error("Too many columns.");
+
+    ret.resize(3);
+
+    auto ptr = (uint8_t*)ret.data();
+
+    *(enum tds_token*)ptr = tds_token::COLMETADATA; ptr += sizeof(enum tds_token);
+    *(uint16_t*)ptr = (uint16_t)field_count; ptr += sizeof(uint16_t);
+
+    for (unsigned int i = 0; i < field_count; i++) {
+        auto f = mysql_fetch_field(res);
+
+        ret += field_metadata(*f);
+    }
+
+    return ret;
+}
+
 void client_thread::batch_msg(const string_view& packet) {
     if (state != client_state::connected)
         throw runtime_error("Not logged in.");
@@ -535,16 +591,23 @@ void client_thread::batch_msg(const string_view& packet) {
 
         string ret;
         uint64_t row_count = 0;
-        bool has_row_count = false;
+        auto field_count = mysql_field_count(&mysql);
 
-        if (mysql_field_count(&mysql)) {
+        if (field_count != 0) {
+            auto res = mysql_store_result(&mysql);
+
+            if (!res)
+                throw runtime_error("mysql_store_result returned NULL");
+
             // FIXME - send multiple packets if too big
+            // FIXME - what happens if EXEC call and multiple rowsets returned?
 
-            // FIXME - send COLMETADATA
+            ret += colmetadata_msg(res, field_count);
+
             // FIXME - send ROW
         }
 
-        ret += done_msg(has_row_count ? 0x10 : 0, 0xc1, row_count);
+        ret += done_msg(field_count != 0 ? 0x10 : 0, 0xc1, row_count);
 
         send_msg(tds_msg::tabular_result, ret);
     } catch (const exception& e) {
