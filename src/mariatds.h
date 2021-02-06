@@ -303,6 +303,7 @@ private:
     void prelogin_msg(const std::string_view& packet);
     void login_msg(const std::string_view& packet);
     void batch_msg(const std::string_view& packet);
+    std::string rows_msg(MYSQL_STMT* stmt, MYSQL_RES* res, uint64_t& row_count);
 
     unsigned int sock;
     std::thread t;

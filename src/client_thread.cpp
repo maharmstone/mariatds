@@ -516,13 +516,26 @@ static string field_metadata(const MYSQL_FIELD& f) {
 
     ret.resize(sizeof(tds_colmetadata_col));
 
-    auto& h = *(tds_colmetadata_col*)ret.data();
+    auto h = (tds_colmetadata_col*)ret.data();
 
-    h.user_type = 0;
-    h.flags = 0; // FIXME - mark for nullable
-    h.type = sql_type::INT; // FIXME - translate from MariaDB type
-
+    h->user_type = 0;
     off = sizeof(tds_colmetadata_col);
+
+    switch (f.type) {
+//         case MYSQL_TYPE_LONG:
+//             // FIXME
+//         break;
+
+        default: {
+            h->flags = 0x80; // nullable
+            h->type = sql_type::INTN;
+
+            ret.resize(ret.length() + 1);
+            ret[ret.length() - 1] = 4;
+            off++;
+        }
+    }
+
 
     // FIXME - append type length, collation, precision, scale
 
@@ -541,8 +554,9 @@ static string field_metadata(const MYSQL_FIELD& f) {
     return ret;
 }
 
-static string colmetadata_msg(MYSQL_RES* res, unsigned int field_count) {
+static string colmetadata_msg(MYSQL_RES* res) {
     string ret;
+    auto field_count = mysql_num_fields(res);
 
     if (field_count > 65535)
         throw runtime_error("Too many columns.");
@@ -563,7 +577,7 @@ static string colmetadata_msg(MYSQL_RES* res, unsigned int field_count) {
     return ret;
 }
 
-static string row_msg(MYSQL_ROW row, unsigned int field_count) {
+static string row_msg(const vector<MYSQL_BIND>& bind) {
     string ret;
     size_t off;
 
@@ -574,14 +588,94 @@ static string row_msg(MYSQL_ROW row, unsigned int field_count) {
 
     off = 1;
 
-    for (unsigned int i = 0; i < field_count; i++) {
+    for (const auto& b : bind) {
         // FIXME - send actual result
 
-        ret.resize(ret.length() + sizeof(int32_t));
+        switch (b.buffer_type) {
+            // FIXME
 
-        *(int32_t*)(ret.data() + off) = 229; // FIXME!
-        off += sizeof(int32_t);
+            default:
+                ret.resize(ret.length() + sizeof(uint8_t));
+                *(uint8_t*)(ret.data() + off) = 0;
+                off += sizeof(uint8_t);
+        }
     }
+
+    return ret;
+}
+
+string client_thread::rows_msg(MYSQL_STMT* stmt, MYSQL_RES* res, uint64_t& row_count) {
+    string ret;
+    auto field_count = mysql_num_fields(res);
+    vector<MYSQL_BIND> bind;
+    vector<char> error, is_null;
+    vector<unsigned long> length;
+    vector<vector<byte>> bufs;
+
+    bind.resize(field_count);
+    error.resize(field_count);
+    is_null.resize(field_count);
+    length.resize(field_count);
+    bufs.resize(field_count);
+
+    memset(bind.data(), 0, sizeof(MYSQL_BIND) * field_count);
+
+    mysql_field_seek(res, 0);
+
+    for (unsigned int i = 0; i < field_count; i++) {
+        auto f = mysql_fetch_field(res);
+        auto b = &bind[i];
+
+        switch (f->type) {
+            case MYSQL_TYPE_LONG:
+                b->buffer_type = f->type;
+
+                bufs[i].resize(sizeof(int32_t));
+
+                b->buffer = bufs[i].data();
+                b->buffer_length = bufs[i].size();
+            break;
+
+            default:
+                b->buffer_type = MYSQL_TYPE_NULL;
+        }
+
+        b->is_null = &is_null[i];
+        b->length = &length[i];
+        b->error = &error[i];
+    }
+
+    if (mysql_stmt_bind_result(stmt, bind.data())){
+        auto err = mysql_stmt_error(stmt);
+
+        if (err && err[0])
+            throw runtime_error(err);
+        else
+            throw runtime_error("mysql_stmt_bind_result failed");
+    }
+
+    do {
+        // FIXME - check for attention message
+
+        auto retval = mysql_stmt_fetch(stmt);
+
+        // FIXME - show warning message if MYSQL_DATA_TRUNCATED received? (Only once?)
+
+        if (retval == MYSQL_NO_DATA)
+            break;
+        else if (retval && retval != MYSQL_DATA_TRUNCATED && retval != MYSQL_NO_DATA) {
+            auto err = mysql_stmt_error(stmt);
+
+            if (err && err[0])
+                throw runtime_error(err);
+            else
+                throw runtime_error("mysql_stmt_fetch failed");
+        }
+
+        ret += row_msg(bind);
+
+        row_count++;
+    } while (true);
 
     return ret;
 }
@@ -603,43 +697,66 @@ void client_thread::batch_msg(const string_view& packet) {
                                           (packet.length() - header_length) / sizeof(char16_t));
         auto query = utf16_to_utf8(query_utf16);
 
-        if (mysql_real_query(&mysql, query.data(), query.length())) {
+        auto stmt = mysql_stmt_init(&mysql);
+
+        if (!stmt) {
             auto err = mysql_error(&mysql);
 
-            if (err)
+            if (err && err[0])
                 throw runtime_error(err);
             else
                 throw runtime_error("mysql_real_query failed");
         }
 
-        string ret;
         uint64_t row_count = 0;
-        auto field_count = mysql_field_count(&mysql);
+        unsigned int field_count = 0;
+        string ret;
 
-        if (field_count != 0) {
-            auto res = mysql_store_result(&mysql);
+        try {
+            if (mysql_stmt_prepare(stmt, query.data(), query.length())) {
+                auto err = mysql_stmt_error(stmt);
 
-            if (!res)
-                throw runtime_error("mysql_store_result returned NULL");
-
-            try {
-                // FIXME - send multiple packets if too big
-                // FIXME - what happens if EXEC call and multiple rowsets returned?
-
-                ret += colmetadata_msg(res, field_count);
-
-                while (MYSQL_ROW row = mysql_fetch_row(res)) {
-                    ret += row_msg(row, field_count);
-
-                    row_count++;
-                }
-            } catch (...) {
-                mysql_free_result(res);
-                throw;
+                if (err && err[0])
+                    throw runtime_error(err);
+                else
+                    throw runtime_error("mysql_stmt_prepare failed");
             }
 
-            mysql_free_result(res);
+            if (mysql_stmt_param_count(stmt) != 0)
+                throw runtime_error("Batch queries cannot contain parameters.");
+
+            auto res = mysql_stmt_result_metadata(stmt);
+
+            if (res) {
+                try {
+                    // FIXME - send multiple packets if too big
+                    // FIXME - what happens if EXEC call and multiple rowsets returned?
+
+                    ret += colmetadata_msg(res);
+
+                    if (mysql_stmt_execute(stmt)) {
+                        auto err = mysql_stmt_error(stmt);
+
+                        if (err && err[0])
+                            throw runtime_error(err);
+                        else
+                            throw runtime_error("mysql_stmt_execute failed");
+                    }
+
+                    ret += rows_msg(stmt, res, row_count);
+                } catch (...) {
+                    mysql_free_result(res);
+                    throw;
+                }
+
+                mysql_free_result(res);
+            }
+        } catch (...) {
+            mysql_stmt_close(stmt);
+            throw;
         }
+
+        mysql_stmt_close(stmt);
 
         ret += done_msg(field_count != 0 ? 0x10 : 0, 0xc1, row_count);
 
