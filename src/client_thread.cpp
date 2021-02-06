@@ -522,9 +522,16 @@ static string field_metadata(const MYSQL_FIELD& f) {
     off = sizeof(tds_colmetadata_col);
 
     switch (f.type) {
-//         case MYSQL_TYPE_LONG:
-//             // FIXME
-//         break;
+        case MYSQL_TYPE_LONG:
+            h->flags = 0x80; // nullable
+            h->type = sql_type::INTN;
+
+            ret.resize(ret.length() + 1);
+            ret[ret.length() - 1] = 4;
+            off++;
+        break;
+
+        // FIXME
 
         default: {
             h->flags = 0x80; // nullable
@@ -580,6 +587,7 @@ static string colmetadata_msg(MYSQL_RES* res) {
 static string row_msg(const vector<MYSQL_BIND>& bind) {
     string ret;
     size_t off;
+    unsigned int i;
 
     // FIXME - send NBC_ROW if more efficient
 
@@ -587,18 +595,36 @@ static string row_msg(const vector<MYSQL_BIND>& bind) {
     *(enum tds_token*)ret.data() = tds_token::ROW;
 
     off = 1;
+    i = 0;
 
     for (const auto& b : bind) {
-        // FIXME - send actual result
-
         switch (b.buffer_type) {
+            case MYSQL_TYPE_LONG:
+                // FIXME - UNSIGNED integers
+
+                if (*b.is_null) {
+                    ret.resize(ret.length() + 1);
+                    ret[off] = 0;
+                    off++;
+                } else {
+                    ret.resize(ret.length() + 1 + sizeof(int32_t));
+                    ret[off] = 4;
+                    off++;
+
+                    *(int32_t*)(&ret[off]) = *(int32_t*)b.buffer;
+                    off += sizeof(int32_t);
+                }
+            break;
+
             // FIXME
 
             default:
                 ret.resize(ret.length() + sizeof(uint8_t));
                 *(uint8_t*)(ret.data() + off) = 0;
-                off += sizeof(uint8_t);
+                off++;
         }
+
+        i++;
     }
 
     return ret;
