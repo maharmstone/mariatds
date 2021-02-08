@@ -556,7 +556,16 @@ static string field_metadata(const MYSQL_FIELD& f) {
         // FIXME - MYSQL_TYPE_DOUBLE
         // FIXME - MYSQL_TYPE_NULL
         // FIXME - MYSQL_TYPE_TIMESTAMP
-        // FIXME - MYSQL_TYPE_LONGLONG
+
+        case MYSQL_TYPE_LONGLONG: // BIGINT
+            h->flags = 0x80; // nullable
+            h->type = sql_type::INTN;
+
+            ret.resize(ret.length() + 1);
+            ret[ret.length() - 1] = 8;
+            off++;
+        break;
+
         // FIXME - MYSQL_TYPE_DATE
         // FIXME - MYSQL_TYPE_TIME
         // FIXME - MYSQL_TYPE_DATETIME
@@ -688,6 +697,21 @@ static string row_msg(const vector<MYSQL_BIND>& bind) {
                 }
             break;
 
+            case MYSQL_TYPE_LONGLONG: // BIGINT
+                if (*b.is_null) {
+                    ret.resize(ret.length() + 1);
+                    ret[off] = 0;
+                    off++;
+                } else {
+                    ret.resize(ret.length() + 1 + sizeof(int64_t));
+                    ret[off] = 8;
+                    off++;
+
+                    *(int64_t*)(&ret[off]) = *(int64_t*)b.buffer;
+                    off += sizeof(int64_t);
+                }
+            break;
+
             // FIXME
 
             default:
@@ -748,6 +772,15 @@ string client_thread::rows_msg(MYSQL_STMT* stmt, MYSQL_RES* res, uint64_t& row_c
                 b->buffer_type = f->type;
 
                 bufs[i].resize(sizeof(int32_t));
+
+                b->buffer = bufs[i].data();
+                b->buffer_length = bufs[i].size();
+            break;
+
+            case MYSQL_TYPE_LONGLONG: // BIGINT
+                b->buffer_type = f->type;
+
+                bufs[i].resize(sizeof(int64_t));
 
                 b->buffer = bufs[i].data();
                 b->buffer_length = bufs[i].size();
