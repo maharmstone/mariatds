@@ -522,6 +522,8 @@ static string field_metadata(const MYSQL_FIELD& f) {
     off = sizeof(tds_colmetadata_col);
 
     switch (f.type) {
+        // FIXME - MYSQL_TYPE_DECIMAL
+
         case MYSQL_TYPE_TINY: // TINYINT
             h->flags = 0x80; // nullable
             h->type = sql_type::INTN;
@@ -550,7 +552,29 @@ static string field_metadata(const MYSQL_FIELD& f) {
             off++;
         break;
 
-        // FIXME
+        // FIXME - MYSQL_TYPE_FLOAT
+        // FIXME - MYSQL_TYPE_DOUBLE
+        // FIXME - MYSQL_TYPE_NULL
+        // FIXME - MYSQL_TYPE_TIMESTAMP
+        // FIXME - MYSQL_TYPE_LONGLONG
+        // FIXME - MYSQL_TYPE_DATE
+        // FIXME - MYSQL_TYPE_TIME
+        // FIXME - MYSQL_TYPE_DATETIME
+        // FIXME - MYSQL_TYPE_YEAR
+        // FIXME - MYSQL_TYPE_NEWDATE
+        // FIXME - MYSQL_TYPE_VARCHAR
+        // FIXME - MYSQL_TYPE_BIT
+        // FIXME - MYSQL_TYPE_JSON
+        // FIXME - MYSQL_TYPE_NEWDECIMAL
+        // FIXME - MYSQL_TYPE_ENUM
+        // FIXME - MYSQL_TYPE_SET
+        // FIXME - MYSQL_TYPE_TINY_BLOB
+        // FIXME - MYSQL_TYPE_MEDIUM_BLOB
+        // FIXME - MYSQL_TYPE_LONG_BLOB
+        // FIXME - MYSQL_TYPE_BLOB
+        // FIXME - MYSQL_TYPE_VAR_STRING
+        // FIXME - MYSQL_TYPE_STRING
+        // FIXME - MYSQL_TYPE_GEOMETRY
 
         default: {
             h->flags = 0x80; // nullable
