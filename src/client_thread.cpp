@@ -583,7 +583,6 @@ static string field_metadata(const MYSQL_FIELD& f) {
         // FIXME - MYSQL_TYPE_BLOB
 
         case MYSQL_TYPE_VAR_STRING: { // VARCHAR
-            // FIXME - VARCHAR(MAX) if length >= 0x8000
             // FIXME - NVARCHAR or NVARCHAR(MAX) if UTF-16 or UCS-2
             // FIXME - UTF-8 (when in UTF-8 mode)
 
@@ -592,7 +591,7 @@ static string field_metadata(const MYSQL_FIELD& f) {
 
             ret.resize(ret.length() + sizeof(uint16_t) + sizeof(tds_collation));
 
-            *(uint16_t*)(ret.data() + off) = (uint16_t)f.length;
+            *(uint16_t*)(ret.data() + off) = f.length > 8000 ? 0xffff : (uint16_t)f.length;
             off += sizeof(uint16_t);
 
             auto coll = (tds_collation*)(ret.data() + off);
@@ -746,21 +745,56 @@ static string row_msg(const vector<MYSQL_BIND>& bind) {
             break;
 
             case MYSQL_TYPE_VAR_STRING: { // VARCHAR
-                ret.resize(ret.length() + sizeof(uint16_t));
+                if (b.buffer_length > 8000) {
+                    ret.resize(ret.length() + sizeof(uint64_t));
 
-                auto size = (uint16_t*)(ret.data() + off);
-                off += sizeof(uint16_t);
+                    auto size = (uint64_t*)(ret.data() + off);
+                    off += sizeof(uint64_t);
 
-                if (*b.is_null)
-                    *size = 0xffff;
-                else if (*b.length == 0)
-                    *size = 0;
-                else {
-                    *size = (uint16_t)*b.length;
+                    if (*b.is_null)
+                        *size = 0xffffffffffffffff;
+                    else if (*b.length == 0) {
+                        *size = 0;
 
-                    ret.resize(ret.length() + *b.length);
-                    memcpy(ret.data() + off, b.buffer, *b.length);
-                    off += *b.length;
+                        ret.resize(ret.length() + sizeof(uint32_t));
+
+                        auto size2 = (uint32_t*)(ret.data() + off);
+                        off += sizeof(uint32_t);
+
+                        *size2 = 0;
+                    } else {
+                        *size = *b.length;
+
+                        ret.resize(ret.length() + sizeof(uint32_t) + *b.length + sizeof(uint32_t));
+
+                        auto size2 = (uint32_t*)(ret.data() + off);
+                        off += sizeof(uint32_t);
+
+                        *size2 = (uint16_t)*b.length;
+
+                        memcpy(ret.data() + off, b.buffer, *b.length);
+                        off += *b.length;
+
+                        *(uint32_t*)(ret.data() + off) = 0;
+                        off += sizeof(uint32_t);
+                    }
+                } else {
+                    ret.resize(ret.length() + sizeof(uint16_t));
+
+                    auto size = (uint16_t*)(ret.data() + off);
+                    off += sizeof(uint16_t);
+
+                    if (*b.is_null)
+                        *size = 0xffff;
+                    else if (*b.length == 0)
+                        *size = 0;
+                    else {
+                        *size = (uint16_t)*b.length;
+
+                        ret.resize(ret.length() + *b.length);
+                        memcpy(ret.data() + off, b.buffer, *b.length);
+                        off += *b.length;
+                    }
                 }
 
                 break;
