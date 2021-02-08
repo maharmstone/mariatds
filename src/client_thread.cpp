@@ -581,7 +581,40 @@ static string field_metadata(const MYSQL_FIELD& f) {
         // FIXME - MYSQL_TYPE_MEDIUM_BLOB
         // FIXME - MYSQL_TYPE_LONG_BLOB
         // FIXME - MYSQL_TYPE_BLOB
-        // FIXME - MYSQL_TYPE_VAR_STRING
+
+        case MYSQL_TYPE_VAR_STRING: { // VARCHAR
+            // FIXME - VARCHAR(MAX) if length >= 0x8000
+            // FIXME - NVARCHAR or NVARCHAR(MAX) if UTF-16 or UCS-2
+            // FIXME - UTF-8 (when in UTF-8 mode)
+
+            h->flags = 0x80; // nullable
+            h->type = sql_type::VARCHAR;
+
+            ret.resize(ret.length() + sizeof(uint16_t) + sizeof(tds_collation));
+
+            *(uint16_t*)(ret.data() + off) = (uint16_t)f.length;
+            off += sizeof(uint16_t);
+
+            auto coll = (tds_collation*)(ret.data() + off);
+
+            // FIXME - collation
+            coll->lcid = 1033; // en-US
+            coll->ignore_case = 1;
+            coll->ignore_accent = 0;
+            coll->ignore_width = 1;
+            coll->ignore_kana = 1;
+            coll->binary = 0;
+            coll->binary2 = 0;
+            coll->utf8 = 0;
+            coll->reserved = 0;
+            coll->version = 0;
+            coll->sort_id = 0;
+
+            off += sizeof(tds_collation);
+
+            break;
+        }
+
         // FIXME - MYSQL_TYPE_STRING
         // FIXME - MYSQL_TYPE_GEOMETRY
 
@@ -712,7 +745,26 @@ static string row_msg(const vector<MYSQL_BIND>& bind) {
                 }
             break;
 
-            // FIXME
+            case MYSQL_TYPE_VAR_STRING: { // VARCHAR
+                ret.resize(ret.length() + sizeof(uint16_t));
+
+                auto size = (uint16_t*)(ret.data() + off);
+                off += sizeof(uint16_t);
+
+                if (*b.is_null)
+                    *size = 0xffff;
+                else if (*b.length == 0)
+                    *size = 0;
+                else {
+                    *size = (uint16_t)*b.length;
+
+                    ret.resize(ret.length() + *b.length);
+                    memcpy(ret.data() + off, b.buffer, *b.length);
+                    off += *b.length;
+                }
+
+                break;
+            }
 
             default:
                 ret.resize(ret.length() + sizeof(uint8_t));
@@ -781,6 +833,15 @@ string client_thread::rows_msg(MYSQL_STMT* stmt, MYSQL_RES* res, uint64_t& row_c
                 b->buffer_type = f->type;
 
                 bufs[i].resize(sizeof(int64_t));
+
+                b->buffer = bufs[i].data();
+                b->buffer_length = bufs[i].size();
+            break;
+
+            case MYSQL_TYPE_VAR_STRING: // VARCHAR
+                b->buffer_type = f->type;
+
+                bufs[i].resize(f->length);
 
                 b->buffer = bufs[i].data();
                 b->buffer_length = bufs[i].size();
