@@ -1051,7 +1051,11 @@ void client_thread::batch_msg(const string_view& packet) {
 
         send_msg(tds_msg::tabular_result, ret);
     } catch (const exception& e) {
-        send_error(e.what());
+        string ret;
+
+        ret = info_msg(true, 0, 0, 14, e.what(), "", "", 0); // FIXME - server name
+        ret += done_msg(0, 0xc1, 0);
+        send_msg(tds_msg::tabular_result, ret);
     }
 }
 
