@@ -566,7 +566,11 @@ static string field_metadata(const MYSQL_FIELD& f) {
             off++;
         break;
 
-        // FIXME - MYSQL_TYPE_DATE
+        case MYSQL_TYPE_DATE: // DATE
+            h->flags = 0x80; // nullable
+            h->type = sql_type::DATE;
+        break;
+
         // FIXME - MYSQL_TYPE_TIME
         // FIXME - MYSQL_TYPE_DATETIME
         // FIXME - MYSQL_TYPE_YEAR
@@ -800,6 +804,37 @@ static string row_msg(const vector<MYSQL_BIND>& bind) {
                 break;
             }
 
+            case MYSQL_TYPE_DATE:
+                if (*b.is_null) {
+                    ret.resize(ret.length() + sizeof(uint8_t));
+                    *(uint8_t*)(ret.data() + off) = 0;
+                    off++;
+                } else {
+                    int64_t n;
+                    int m2, num;
+
+                    ret.resize(ret.length() + sizeof(uint8_t) + 3);
+                    *(uint8_t*)(ret.data() + off) = 3;
+                    off++;
+
+                    auto& tm = *(MYSQL_TIME*)b.buffer;
+
+                    m2 = ((int)tm.month - 14) / 12;
+
+                    n = (1461 * ((int)tm.year + 4800 + m2)) / 4;
+                    n += (367 * ((int)tm.month - 2 - (12 * m2))) / 12;
+                    n -= (3 * (((int)tm.year + 4900 + m2)/100)) / 4;
+                    n += tm.day;
+                    n -= 1753501;
+
+                    num = static_cast<int>(n);
+
+                    memcpy(ret.data() + off, &num, 3);
+
+                    off += 3;
+                }
+            break;
+
             default:
                 ret.resize(ret.length() + sizeof(uint8_t));
                 *(uint8_t*)(ret.data() + off) = 0;
@@ -876,6 +911,15 @@ string client_thread::rows_msg(MYSQL_STMT* stmt, MYSQL_RES* res, uint64_t& row_c
                 b->buffer_type = f->type;
 
                 bufs[i].resize(f->length);
+
+                b->buffer = bufs[i].data();
+                b->buffer_length = bufs[i].size();
+            break;
+
+            case MYSQL_TYPE_DATE: // DATE
+                b->buffer_type = f->type;
+
+                bufs[i].resize(sizeof(MYSQL_TIME));
 
                 b->buffer = bufs[i].data();
                 b->buffer_length = bufs[i].size();
