@@ -522,7 +522,26 @@ static string field_metadata(const MYSQL_FIELD& f) {
     off = sizeof(tds_colmetadata_col);
 
     switch (f.type) {
-        case MYSQL_TYPE_LONG:
+        case MYSQL_TYPE_TINY: // TINYINT
+            h->flags = 0x80; // nullable
+            h->type = sql_type::INTN;
+
+            ret.resize(ret.length() + 1);
+            ret[ret.length() - 1] = 1;
+            off++;
+        break;
+
+        case MYSQL_TYPE_SHORT: // SMALLINT
+            h->flags = 0x80; // nullable
+            h->type = sql_type::INTN;
+
+            ret.resize(ret.length() + 1);
+            ret[ret.length() - 1] = 2;
+            off++;
+        break;
+
+        case MYSQL_TYPE_INT24: // MEDIUMINT
+        case MYSQL_TYPE_LONG: // INT
             h->flags = 0x80; // nullable
             h->type = sql_type::INTN;
 
@@ -542,7 +561,6 @@ static string field_metadata(const MYSQL_FIELD& f) {
             off++;
         }
     }
-
 
     // FIXME - append type length, collation, precision, scale
 
@@ -590,6 +608,7 @@ static string row_msg(const vector<MYSQL_BIND>& bind) {
     unsigned int i;
 
     // FIXME - send NBC_ROW if more efficient
+    // FIXME - UNSIGNED integers
 
     ret.resize(1);
     *(enum tds_token*)ret.data() = tds_token::ROW;
@@ -599,9 +618,38 @@ static string row_msg(const vector<MYSQL_BIND>& bind) {
 
     for (const auto& b : bind) {
         switch (b.buffer_type) {
-            case MYSQL_TYPE_LONG:
-                // FIXME - UNSIGNED integers
+            case MYSQL_TYPE_TINY: // TINYINT
+                if (*b.is_null) {
+                    ret.resize(ret.length() + 1);
+                    ret[off] = 0;
+                    off++;
+                } else {
+                    ret.resize(ret.length() + 1 + sizeof(uint8_t));
+                    ret[off] = 1;
+                    off++;
 
+                    *(uint8_t*)(&ret[off]) = *(uint8_t*)b.buffer;
+                    off += sizeof(uint8_t);
+                }
+            break;
+
+            case MYSQL_TYPE_SHORT: // SMALLINT
+                if (*b.is_null) {
+                    ret.resize(ret.length() + 1);
+                    ret[off] = 0;
+                    off++;
+                } else {
+                    ret.resize(ret.length() + 1 + sizeof(int16_t));
+                    ret[off] = 2;
+                    off++;
+
+                    *(int16_t*)(&ret[off]) = *(int16_t*)b.buffer;
+                    off += sizeof(int16_t);
+                }
+            break;
+
+            case MYSQL_TYPE_INT24: // MEDIUMINT
+            case MYSQL_TYPE_LONG: // INT
                 if (*b.is_null) {
                     ret.resize(ret.length() + 1);
                     ret[off] = 0;
@@ -653,7 +701,26 @@ string client_thread::rows_msg(MYSQL_STMT* stmt, MYSQL_RES* res, uint64_t& row_c
         auto b = &bind[i];
 
         switch (f->type) {
-            case MYSQL_TYPE_LONG:
+            case MYSQL_TYPE_TINY: // TINYINT
+                b->buffer_type = f->type;
+
+                bufs[i].resize(sizeof(uint8_t));
+
+                b->buffer = bufs[i].data();
+                b->buffer_length = bufs[i].size();
+            break;
+
+            case MYSQL_TYPE_SHORT: // SMALLINT
+                b->buffer_type = f->type;
+
+                bufs[i].resize(sizeof(int16_t));
+
+                b->buffer = bufs[i].data();
+                b->buffer_length = bufs[i].size();
+            break;
+
+            case MYSQL_TYPE_INT24: // MEDIUMINT
+            case MYSQL_TYPE_LONG: // INT
                 b->buffer_type = f->type;
 
                 bufs[i].resize(sizeof(int32_t));
