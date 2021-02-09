@@ -602,12 +602,18 @@ static string field_metadata(const MYSQL_FIELD& f) {
         // FIXME - MYSQL_TYPE_LONG_BLOB
         // FIXME - MYSQL_TYPE_BLOB
 
-        case MYSQL_TYPE_VAR_STRING: { // VARCHAR
+        case MYSQL_TYPE_VAR_STRING: // VARCHAR
+        case MYSQL_TYPE_STRING:
+        {
             // FIXME - NVARCHAR or NVARCHAR(MAX) if UTF-16 or UCS-2
             // FIXME - UTF-8 (when in UTF-8 mode)
 
             h->flags = 0x80; // nullable
-            h->type = sql_type::VARCHAR;
+
+            if (f.type == MYSQL_TYPE_STRING && f.length <= 8000)
+                h->type = sql_type::CHAR;
+            else
+                h->type = sql_type::VARCHAR;
 
             ret.resize(ret.length() + sizeof(uint16_t) + sizeof(tds_collation));
 
@@ -785,7 +791,9 @@ static string row_msg(const vector<MYSQL_BIND>& bind) {
                 }
             break;
 
-            case MYSQL_TYPE_VAR_STRING: { // VARCHAR
+            case MYSQL_TYPE_VAR_STRING: // VARCHAR
+            case MYSQL_TYPE_STRING: // CHAR
+            {
                 if (b.buffer_length > 8000) {
                     ret.resize(ret.length() + sizeof(uint64_t));
 
@@ -977,6 +985,7 @@ string client_thread::rows_msg(MYSQL_STMT* stmt, MYSQL_RES* res, uint64_t& row_c
             break;
 
             case MYSQL_TYPE_VAR_STRING: // VARCHAR
+            case MYSQL_TYPE_STRING: // CHAR
                 b->buffer_type = f->type;
 
                 bufs[i].resize(f->length);
