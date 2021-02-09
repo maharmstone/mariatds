@@ -571,7 +571,14 @@ static string field_metadata(const MYSQL_FIELD& f) {
             h->type = sql_type::DATE;
         break;
 
-        // FIXME - MYSQL_TYPE_TIME
+        case MYSQL_TYPE_TIME: // TIME
+            h->flags = 0x80; // nullable
+            h->type = sql_type::TIME;
+
+            ret.resize(ret.length() + 1);
+            ret[ret.length() - 1] = 0;
+            off++;
+        break;
 
         case MYSQL_TYPE_DATETIME: // DATETIME
             h->flags = 0x80; // nullable
@@ -854,6 +861,25 @@ static string row_msg(const vector<MYSQL_BIND>& bind) {
                 }
             break;
 
+            case MYSQL_TYPE_TIME:
+                if (*b.is_null) {
+                    ret.resize(ret.length() + sizeof(uint8_t));
+                    *(uint8_t*)(ret.data() + off) = 0;
+                    off++;
+                } else {
+                    int num;
+
+                    ret.resize(ret.length() + sizeof(uint8_t) + 3);
+                    *(uint8_t*)(ret.data() + off) = 3;
+                    off++;
+
+                    num = time_to_num(*(MYSQL_TIME*)b.buffer);
+
+                    memcpy(ret.data() + off, &num, 3);
+                    off += 3;
+                }
+            break;
+
             case MYSQL_TYPE_DATETIME:
                 if (*b.is_null) {
                     ret.resize(ret.length() + sizeof(uint8_t));
@@ -960,6 +986,7 @@ string client_thread::rows_msg(MYSQL_STMT* stmt, MYSQL_RES* res, uint64_t& row_c
             break;
 
             case MYSQL_TYPE_DATE: // DATE
+            case MYSQL_TYPE_TIME: // TIME
             case MYSQL_TYPE_DATETIME: // DATETIME
                 b->buffer_type = f->type;
 
