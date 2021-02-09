@@ -572,7 +572,16 @@ static string field_metadata(const MYSQL_FIELD& f) {
         break;
 
         // FIXME - MYSQL_TYPE_TIME
-        // FIXME - MYSQL_TYPE_DATETIME
+
+        case MYSQL_TYPE_DATETIME: // DATETIME
+            h->flags = 0x80; // nullable
+            h->type = sql_type::DATETIME2;
+
+            ret.resize(ret.length() + 1);
+            ret[ret.length() - 1] = 0;
+            off++;
+        break;
+
         // FIXME - MYSQL_TYPE_YEAR
         // FIXME - MYSQL_TYPE_NEWDATE
         // FIXME - MYSQL_TYPE_VARCHAR
@@ -669,6 +678,27 @@ static string colmetadata_msg(MYSQL_RES* res) {
     }
 
     return ret;
+}
+
+static int date_to_num(const MYSQL_TIME& tm) {
+    int64_t n;
+    int m2;
+
+    m2 = ((int)tm.month - 14) / 12;
+
+    n = (1461 * ((int)tm.year + 4800 + m2)) / 4;
+    n += (367 * ((int)tm.month - 2 - (12 * m2))) / 12;
+    n -= (3 * (((int)tm.year + 4900 + m2)/100)) / 4;
+    n += tm.day;
+    n -= 1753501;
+
+    return static_cast<int>(n);
+}
+
+static int time_to_num(const MYSQL_TIME& tm) {
+    // FIXME - include fractions of a second?
+
+    return (tm.hour * 3600) + (tm.minute * 60) + tm.second;
 }
 
 static string row_msg(const vector<MYSQL_BIND>& bind) {
@@ -810,27 +840,40 @@ static string row_msg(const vector<MYSQL_BIND>& bind) {
                     *(uint8_t*)(ret.data() + off) = 0;
                     off++;
                 } else {
-                    int64_t n;
-                    int m2, num;
+                    int num;
 
                     ret.resize(ret.length() + sizeof(uint8_t) + 3);
                     *(uint8_t*)(ret.data() + off) = 3;
                     off++;
 
-                    auto& tm = *(MYSQL_TIME*)b.buffer;
-
-                    m2 = ((int)tm.month - 14) / 12;
-
-                    n = (1461 * ((int)tm.year + 4800 + m2)) / 4;
-                    n += (367 * ((int)tm.month - 2 - (12 * m2))) / 12;
-                    n -= (3 * (((int)tm.year + 4900 + m2)/100)) / 4;
-                    n += tm.day;
-                    n -= 1753501;
-
-                    num = static_cast<int>(n);
+                    num = date_to_num(*(MYSQL_TIME*)b.buffer);
 
                     memcpy(ret.data() + off, &num, 3);
 
+                    off += 3;
+                }
+            break;
+
+            case MYSQL_TYPE_DATETIME:
+                if (*b.is_null) {
+                    ret.resize(ret.length() + sizeof(uint8_t));
+                    *(uint8_t*)(ret.data() + off) = 0;
+                    off++;
+                } else {
+                    int num;
+
+                    ret.resize(ret.length() + sizeof(uint8_t) + 6);
+                    *(uint8_t*)(ret.data() + off) = 6;
+                    off++;
+
+                    num = time_to_num(*(MYSQL_TIME*)b.buffer);
+
+                    memcpy(ret.data() + off, &num, 3);
+                    off += 3;
+
+                    num = date_to_num(*(MYSQL_TIME*)b.buffer);
+
+                    memcpy(ret.data() + off, &num, 3);
                     off += 3;
                 }
             break;
@@ -917,6 +960,7 @@ string client_thread::rows_msg(MYSQL_STMT* stmt, MYSQL_RES* res, uint64_t& row_c
             break;
 
             case MYSQL_TYPE_DATE: // DATE
+            case MYSQL_TYPE_DATETIME: // DATETIME
                 b->buffer_type = f->type;
 
                 bufs[i].resize(sizeof(MYSQL_TIME));
